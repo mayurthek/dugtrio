@@ -10,6 +10,17 @@ export interface CrawlOptions {
   maxDepth?: number;
   /** Limiter for concurrent page visits. */
   concurrency?: number;
+  /** Where to write screenshot artifacts. */
+  screenshotsDir?: string;
+}
+
+import type { Finding } from "../agents/types.js";
+
+export interface FindingCounts {
+  high: number;
+  medium: number;
+  low: number;
+  byCategory: Record<string, number>;
 }
 
 export interface CrawlPage {
@@ -33,6 +44,10 @@ export interface CrawlPage {
   brokenLinks?: BrokenLink[];
   /** Set when the page could not be loaded (timeout, connection error, ...). */
   error?: string;
+  /** Full-page screenshot captured as evidence (path on disk). */
+  screenshot?: string;
+  /** Flaws the worker agents found on this page. */
+  findings: Finding[];
 }
 
 export interface BrokenLink {
@@ -59,7 +74,10 @@ export interface CrawlReport {
     skippedLimit: number;
     failed: number;
     brokenLinks: number;
+    findings: FindingCounts;
   };
   pages: CrawlPage[];
   brokenLinks: BrokenLink[];
+  /** Every finding from every page, as a flat list. */
+  findings: Finding[];
 }

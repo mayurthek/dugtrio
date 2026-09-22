@@ -1,8 +1,11 @@
 import { chromium, type Page, type APIRequestContext } from "playwright";
+import { join } from "node:path";
 import { normalizeUrl, isInternalLink } from "./link-normalizer.js";
 import { CRAWLER_USER_AGENT, fetchRobots, isPathAllowed } from "./robots.js";
 import { fetchSitemap } from "./sitemap.js";
-import type { CrawlOptions, CrawlPage, CrawlReport, BrokenLink } from "./types.js";
+import type { CrawlOptions, CrawlPage, CrawlReport, BrokenLink, FindingCounts } from "./types.js";
+import { runPageAgents, trackPage } from "../agents/index.js";
+import type { Finding } from "../agents/types.js";
 
 interface QueueItem {
   url: string;
@@ -50,6 +53,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
   const totalTimeout = options.totalTimeout ?? 5 * 60_000;
   const maxDepth = options.maxDepth ?? 3;
   const concurrency = Math.max(1, options.concurrency ?? 2);
+  const screenshotsDir = options.screenshotsDir ?? join(process.cwd(), "artifacts", "screenshots");
 
   const startedAt = new Date();
   const deadline = Date.now() + totalTimeout;
@@ -66,6 +70,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
 
   const pages: CrawlPage[] = [];
   const brokenLinks: BrokenLink[] = [];
+  const allFindings: Finding[] = [];
   const visited = new Set<string>();
   const queue: QueueItem[] = [];
   const deferredChecks: DeferredCheck[] = [];
@@ -117,6 +122,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
       attempted++;
       const page = await browser.newPage({ userAgent: CRAWLER_USER_AGENT });
       page.setDefaultTimeout(pageTimeout);
+      const telemetry = trackPage(page);
 
       const record: CrawlPage = {
         url: item.url,
@@ -125,6 +131,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
         depth: item.depth,
         discoveredFrom: item.discoveredFrom,
         links: [],
+        findings: [],
       };
       let duplicate = false;
 
@@ -171,6 +178,19 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
           }
           enqueue({ url: link.absolute, canonical: link.target, depth: nextDepth, discoveredFrom: finalUrl });
         }
+
+        // Run the worker agents against this page.
+        const pageFindings = await runPageAgents({
+          page,
+          pageRecord: record,
+          response: resp,
+          finalUrl,
+          baseUrl,
+          telemetry,
+          screenshotsDir,
+        });
+        record.findings = pageFindings;
+        allFindings.push(...pageFindings);
       } catch (err) {
         stats.failed++;
         record.error = err instanceof Error ? err.message : String(err);
@@ -228,10 +248,25 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
     startedAt: startedAt.toISOString(),
     endedAt: endedAt.toISOString(),
     durationMs: endedAt.getTime() - startedAt.getTime(),
-    stats: { ...stats, crawled: pages.length, brokenLinks: brokenLinks.length },
+    stats: {
+      ...stats,
+      crawled: pages.length,
+      brokenLinks: brokenLinks.length,
+      findings: summarizeFindings(allFindings),
+    },
     pages,
     brokenLinks,
+    findings: allFindings,
   };
+}
+
+function summarizeFindings(findings: Finding[]): FindingCounts {
+  const counts: FindingCounts = { high: 0, medium: 0, low: 0, byCategory: {} };
+  for (const f of findings) {
+    counts[f.severity]++;
+    counts.byCategory[f.category] = (counts.byCategory[f.category] ?? 0) + 1;
+  }
+  return counts;
 }
 
 async function checkTarget(request: APIRequestContext, target: string, timeout: number): Promise<number> {

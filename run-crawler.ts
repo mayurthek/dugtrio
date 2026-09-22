@@ -22,7 +22,8 @@ try {
   console.error(
     `Done in ${(Date.now() - started) / 1000}s | ` +
       `pages crawled: ${report.stats.crawled}, discovered: ${report.stats.discovered}, ` +
-      `broken links: ${report.stats.brokenLinks}, failed: ${report.stats.failed}`
+      `broken links: ${report.stats.brokenLinks}, failed: ${report.stats.failed}, ` +
+      `findings: ${report.stats.findings.high} high / ${report.stats.findings.medium} med / ${report.stats.findings.low} low`
   );
   process.stdout.write(JSON.stringify(report, null, 2));
 } catch (err) {
