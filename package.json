@@ -1,0 +1,21 @@
+{
+  "name": "dugtrio",
+  "version": "0.1.0",
+  "description": "Multi-agent website testing webapp - Milestone 1: crawler agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "crawl": "tsx run-crawler.ts",
+    "server": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "playwright": "^1.44.0",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.5"
+  }
+}
