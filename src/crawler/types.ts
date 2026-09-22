@@ -12,7 +12,25 @@ export interface CrawlOptions {
   concurrency?: number;
   /** Where to write screenshot artifacts. */
   screenshotsDir?: string;
+  /** Receive real-time crawl events (used for live UI). */
+  onEvent?: (evt: CrawlEvent) => void;
 }
+
+export interface LiveStats {
+  crawled: number;
+  discovered: number;
+  planned: number;
+  failed: number;
+}
+
+export type CrawlEvent =
+  | { type: "started"; baseUrl: string }
+  | { type: "log"; level: "info" | "ok" | "warn"; message: string }
+  | { type: "page"; page: CrawlPage }
+  | { type: "stats"; stats: LiveStats }
+  | { type: "brokenLink"; link: BrokenLink }
+  | { type: "done"; report: CrawlReport }
+  | { type: "error"; message: string };
 
 import type { Finding } from "../agents/types.js";
 

@@ -1,7 +1,7 @@
 {
   "name": "dugtrio",
   "version": "0.1.0",
-  "description": "Multi-agent website testing webapp - Milestone 1: crawler agent",
+  "description": "Multi-agent website testing webapp with a live dashboard",
   "private": true,
   "type": "module",
   "scripts": {

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { normalizeUrl, isInternalLink } from "./link-normalizer.js";
 import { CRAWLER_USER_AGENT, fetchRobots, isPathAllowed } from "./robots.js";
 import { fetchSitemap } from "./sitemap.js";
-import type { CrawlOptions, CrawlPage, CrawlReport, BrokenLink, FindingCounts } from "./types.js";
+import type { CrawlOptions, CrawlPage, CrawlReport, BrokenLink, FindingCounts, CrawlEvent } from "./types.js";
 import { runPageAgents, trackPage } from "../agents/index.js";
 import type { Finding } from "../agents/types.js";
 
@@ -77,6 +77,10 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
 
   let plannedVisits = 0;
   let attempted = 0;
+  const emit = (evt: CrawlEvent) => options.onEvent?.(evt);
+  const log = (level: "info" | "ok" | "warn", message: string) => {
+    emit({ type: "log", level, message });
+  };
 
   const browser = await chromium.launch({ headless: true });
 
@@ -87,6 +91,8 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
 
   try {
     const robots = await fetchRobots(baseUrl);
+    emit({ type: "started", baseUrl });
+    log("info", `Crawling ${baseUrl} (max ${maxPages} pages, depth ${maxDepth})`);
 
     const seed = normalizeUrl(baseUrl, baseUrl);
     const seedPath = new URL(seed).pathname;
@@ -97,7 +103,9 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
     stats.discovered++;
     enqueue({ url: baseUrl, canonical: seed, depth: 0, discoveredFrom: undefined });
 
-    for (const sitemapUrl of await fetchSitemap(baseUrl)) {
+    const sitemapUrls = await fetchSitemap(baseUrl);
+    if (sitemapUrls.length > 0) log("info", `Found ${sitemapUrls.length} URLs in sitemap.xml`);
+    for (const sitemapUrl of sitemapUrls) {
       if (visited.has(sitemapUrl)) continue;
       visited.add(sitemapUrl);
       stats.discovered++;
@@ -120,6 +128,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
 
     const visit = async (item: QueueItem) => {
       attempted++;
+      log("info", `Testing ${item.canonical} (depth ${item.depth})`);
       const page = await browser.newPage({ userAgent: CRAWLER_USER_AGENT });
       page.setDefaultTimeout(pageTimeout);
       const telemetry = trackPage(page);
@@ -191,6 +200,16 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
         });
         record.findings = pageFindings;
         allFindings.push(...pageFindings);
+        emit({ type: "page", page: record });
+        emit({
+          type: "stats",
+          stats: { crawled: pages.length + 1, discovered: stats.discovered, planned: plannedVisits, failed: stats.failed },
+        });
+        if (pageFindings.length > 0) {
+          log("ok", `${pageFindings.length} flaw(s) found on ${canonical}`);
+        } else {
+          log("info", `${canonical} looks clean`);
+        }
       } catch (err) {
         stats.failed++;
         record.error = err instanceof Error ? err.message : String(err);
@@ -203,12 +222,15 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
 
       // A real page we visited and got an error status is a broken link too.
       if (record.status >= 400 && record.discoveredFrom) {
-        brokenLinks.push({
+        const link: BrokenLink = {
           from: record.discoveredFrom,
           href: record.url,
           target: record.canonical,
           status: record.status,
-        });
+        };
+        brokenLinks.push(link);
+        emit({ type: "brokenLink", link });
+        log("warn", `Broken link: ${record.canonical} (HTTP ${record.status})`);
       }
     };
 
@@ -232,7 +254,10 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
         if (Date.now() >= deadline) break;
         const status = await checkTarget(apiContext.request, check.target, pageTimeout);
         if (status >= 400 || status === 0) {
-          brokenLinks.push({ from: check.from, href: check.href, target: check.target, status });
+          const link: BrokenLink = { from: check.from, href: check.href, target: check.target, status };
+          brokenLinks.push(link);
+          emit({ type: "brokenLink", link });
+          log("warn", `Broken link: ${check.target} (HTTP ${status})`);
         }
       }
     } finally {
@@ -243,7 +268,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
   }
 
   const endedAt = new Date();
-  return {
+  const report: CrawlReport = {
     baseUrl: ensureAbsolute(baseUrl),
     startedAt: startedAt.toISOString(),
     endedAt: endedAt.toISOString(),
@@ -258,6 +283,8 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
     brokenLinks,
     findings: allFindings,
   };
+  emit({ type: "done", report });
+  return report;
 }
 
 function summarizeFindings(findings: Finding[]): FindingCounts {

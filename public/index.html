@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dugtrio — Website Testing Agent</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦝</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🦝</span>
+      <div>
+        <h1>Dugtrio</h1>
+        <p class="tagline">Multi-agent website testing — watch it hunt flaws live</p>
+      </div>
+    </div>
+    <div id="jet-status" class="jet"></div>
+  </header>
+
+  <main>
+    <section class="panel launch">
+      <form id="test-form" autocomplete="off">
+        <label class="url-label" for="url">Website to test</label>
+        <div class="row">
+          <input id="url" name="url" type="text" placeholder="https://yoursite.com" required spellcheck="false" />
+          <input id="maxPages" name="maxPages" type="number" min="1" max="200" value="25" title="Max pages to crawl" />
+          <input id="maxDepth" name="maxDepth" type="number" min="0" max="10" value="2" title="Max link depth" />
+          <button id="run-btn" type="submit">Run test</button>
+        </div>
+        <p class="hint">maxPages · maxDepth — keep them small so tests finish fast</p>
+      </form>
+      <div id="error-banner" class="error-banner hidden"></div>
+    </section>
+
+    <section id="run-panel" class="hidden">
+      <div class="stat-grid">
+        <div class="stat"><span id="stat-url" class="stat-url">—</span></div>
+        <div class="stat"><span class="stat-num" id="stat-discovered">0</span><span class="stat-label">URLs discovered</span></div>
+        <div class="stat"><span class="stat-num" id="stat-crawled">0</span><span class="stat-label">pages tested</span></div>
+        <div class="stat"><span class="stat-num" id="stat-high">0</span><span class="stat-label">high</span></div>
+        <div class="stat"><span class="stat-num" id="stat-med">0</span><span class="stat-label">medium</span></div>
+        <div class="stat"><span class="stat-num" id="stat-low">0</span><span class="stat-label">low</span></div>
+        <div class="stat"><span class="stat-num" id="stat-time">0:00</span><span class="stat-label">elapsed</span></div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel findings-col">
+          <div class="findings-head">
+            <h2>Findings <span id="findings-count" class="count-badge">0</span></h2>
+            <div class="filters">
+              <button class="filter active" data-filter="all">All</button>
+              <button class="filter high" data-filter="high">High</button>
+              <button class="filter med" data-filter="medium">Medium</button>
+              <button class="filter low" data-filter="low">Low</button>
+            </div>
+          </div>
+          <div id="findings" class="findings-list">
+            <p class="empty">Findings will stream in here live…</p>
+          </div>
+        </div>
+
+        <div class="panel activity-col">
+          <h2>Live activity</h2>
+          <div id="broken-links" class="broken-block">
+            <h3>Broken links <span id="broken-count" class="count-badge">0</span></h3>
+            <ul id="broken-list"></ul>
+          </div>
+          <h3>Pages tested</h3>
+          <div id="page-chips" class="chips"></div>
+          <h3>Agent log</h3>
+          <pre id="log" class="log"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
