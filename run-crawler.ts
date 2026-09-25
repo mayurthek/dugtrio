@@ -1,4 +1,5 @@
 import { crawl } from "./src/crawler/crawler.js";
+import { buildTestReport } from "./src/reporter/reporter.js";
 
 const url = process.argv[2];
 
@@ -18,12 +19,14 @@ const started = Date.now();
 console.error(`Crawling ${url} (max ${maxPages} pages, depth ${maxDepth}) ...`);
 
 try {
-  const report = await crawl({ baseUrl: url, maxPages, maxDepth });
+  const crawlReport = await crawl({ baseUrl: url, maxPages, maxDepth });
+  const report = buildTestReport(crawlReport);
+  const s = report.summary;
   console.error(
-    `Done in ${(Date.now() - started) / 1000}s | ` +
-      `pages crawled: ${report.stats.crawled}, discovered: ${report.stats.discovered}, ` +
-      `broken links: ${report.stats.brokenLinks}, failed: ${report.stats.failed}, ` +
-      `findings: ${report.stats.findings.high} high / ${report.stats.findings.medium} med / ${report.stats.findings.low} low`
+    `Done in ${(Date.now() - started) / 1000}s | score: ${report.score}/100 | ` +
+      `pages: ${s.pagesTested}, broken links: ${s.brokenLinks}, ` +
+      `findings: ${s.totalFindings} total (${s.uniqueFlaws} unique) | ` +
+      `${s.bySeverity.high} high / ${s.bySeverity.medium} med / ${s.bySeverity.low} low`
   );
   process.stdout.write(JSON.stringify(report, null, 2));
 } catch (err) {

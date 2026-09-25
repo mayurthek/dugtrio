@@ -3,16 +3,20 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { crawl } from "./crawler/crawler.js";
-import type { CrawlEvent, CrawlReport } from "./crawler/types.js";
+import { buildTestReport, type TestReport } from "./reporter/reporter.js";
+import type { CrawlEvent } from "./crawler/types.js";
+
+/** Crawl events plus the final ranked report. */
+type UiEvent = CrawlEvent | { type: "report"; report: TestReport };
 
 interface Job {
   id: string;
   baseUrl: string;
   status: "running" | "done" | "error";
   createdAt: string;
-  events: CrawlEvent[];
+  events: UiEvent[];
   clients: Set<Response>;
-  report?: CrawlReport;
+  report?: TestReport;
   error?: string;
 }
 
@@ -26,7 +30,7 @@ app.use(express.json());
 app.use(express.static(join(__dirname, "..", "public")));
 app.use("/screenshots", express.static(screenshotsDir));
 
-function broadcast(job: Job, event: CrawlEvent) {
+function broadcast(job: Job, event: UiEvent) {
   job.events.push(event);
   const payload = `event: message\ndata: ${JSON.stringify(event)}\n\n`;
   for (const client of job.clients) {
@@ -69,8 +73,10 @@ app.post("/test", (req, res) => {
     onEvent: (event) => {
       broadcast(job, event);
       if (event.type === "done") {
+        // Reporter: dedupe, rank, score the findings into the final report.
+        job.report = buildTestReport(event.report);
         job.status = "done";
-        job.report = event.report;
+        broadcast(job, { type: "report", report: job.report });
         finishEventStream(job);
       }
       if (event.type === "error") {
@@ -126,8 +132,10 @@ app.get("/jobs", (_req, res) => {
       baseUrl: j.baseUrl,
       status: j.status,
       createdAt: j.createdAt,
-      pages: j.report?.stats.crawled ?? j.events.filter((e) => e.type === "page").length,
-      findings: j.report?.stats.findings ?? null,
+      score: j.report?.score ?? null,
+      pages: j.report?.summary.pagesTested ?? j.events.filter((e) => e.type === "page").length,
+      flaws: j.report?.summary.uniqueFlaws ?? null,
+      findings: j.report?.summary.bySeverity ?? null,
     }))
   );
 });

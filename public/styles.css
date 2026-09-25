@@ -95,7 +95,7 @@ button:hover { filter: brightness(1.2); }
 
 .stat-grid {
   display: grid;
-  grid-template-columns: 2fr repeat(6, 1fr);
+  grid-template-columns: 2fr repeat(7, 1fr);
   gap: 10px;
   margin-bottom: 16px;
 }
@@ -112,6 +112,9 @@ button:hover { filter: brightness(1.2); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .stat-num { display: block; font-size: 22px; font-weight: 700; }
+.stat-num.score.good { color: var(--low); }
+.stat-num.score.mid { color: var(--med); }
+.stat-num.score.bad { color: var(--high); }
 .stat-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 
 .two-col {
@@ -166,6 +169,17 @@ h3 { font-size: 13px; margin: 16px 0 8px; color: var(--muted); }
 .badge.low { background: rgba(63,185,80,0.15); color: var(--low); }
 .badge.cat {
   background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+}
+.badge.pages {
+  background: rgba(76,141,255,0.12); color: var(--accent); border: 1px solid rgba(76,141,255,0.4);
+  margin-left: auto;
+}
+.f-more {
+  margin: 6px 0; font-size: 12px; color: var(--muted);
+}
+.f-more code {
+  display: block; white-space: pre-wrap; word-break: break-all;
+  color: var(--accent); font-size: 11px; margin-top: 3px;
 }
 
 .f-title { font-weight: 600; }

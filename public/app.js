@@ -8,6 +8,7 @@ const state = {
   startedAt: null,
   severityFilter: "all",
   brokenCount: 0,
+  report: null,
 };
 
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
@@ -95,17 +96,29 @@ function appendFinding(f) {
 function renderFindings() {
   const box = $("findings");
   box.innerHTML = "";
-  const list = [...state.findings.values()].sort(
-    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-  );
-  const filtered = state.severityFilter === "all"
+  const byId = (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
+
+  let items;
+  if (state.report) {
+    // Final view: deduped, ranked flaws.
+    $("findings-count").textContent = state.report.summary.uniqueFlaws;
+    items = state.report.flaws.filter(
+      (f) => state.severityFilter === "all" || f.severity === state.severityFilter
+    );
+    if (!items.length) box.innerHTML = '<p class="empty">No findings yet.</p>';
+    for (const f of items) box.appendChild(flawCard(f));
+    return;
+  }
+
+  const list = [...state.findings.values()].sort(byId);
+  items = state.severityFilter === "all"
     ? list
     : list.filter((f) => f.severity === state.severityFilter);
-  if (!filtered.length) {
+  if (!items.length) {
     box.innerHTML = '<p class="empty">No findings yet.</p>';
     return;
   }
-  for (const f of filtered) box.appendChild(findingCard(f));
+  for (const f of items) box.appendChild(findingCard(f));
 }
 
 function updateCounts() {
@@ -114,6 +127,35 @@ function updateCounts() {
   $("stat-high").textContent = counts.high;
   $("stat-med").textContent = counts.medium;
   $("stat-low").textContent = counts.low;
+}
+
+function flawCard(flaw) {
+  const card = document.createElement("article");
+  card.className = `finding sev-${flaw.severity}`;
+  const pages = [...new Set(flaw.occurrences.map((o) => o.url))];
+  const first = flaw.occurrences[0] ?? {};
+  const shotPath = state.screenshots.get(first.url);
+  const shotUrl = shotPath ? screenshotUrl(shotPath) : null;
+  const shot = shotUrl ? `<div class="f-shot"><a href="${shotUrl}" target="_blank"><img src="${shotUrl}" alt="page screenshot" loading="lazy" /></a></div>` : "";
+  const others = pages.length > 1
+    ? `<p class="f-more">Also affects ${pages.length - 1} other page(s):<br /><code>${esc(pages.slice(1, 6).join("\n"))}</code>${pages.length > 6 ? `<br />…and ${pages.length - 6} more` : ""}</p>`
+    : "";
+
+  card.innerHTML = `
+    <div class="f-head">
+      <span class="badge ${flaw.severity}">${flaw.severity}</span>
+      <span class="badge cat">${flaw.category}</span>
+      <span class="f-title">${esc(flaw.title)}</span>
+      ${pages.length > 1 ? `<span class="badge pages">${pages.length} pages</span>` : ""}
+    </div>
+    <p class="f-msg">${esc(flaw.message)}</p>
+    ${first.selector || first.resource ? `<span class="f-loc">${first.selector ? `Selector: <code>${esc(first.selector)}</code>` : ""} ${first.resource ? `↳ ${esc(first.resource)}` : ""}</span>` : ""}
+    <span class="f-loc">${esc(first.url ?? "")}</span>
+    ${others}
+    ${shot}
+    <div class="f-fix"><strong>How to fix</strong>${esc(flaw.fix)}</div>
+  `;
+  return card;
 }
 
 function addBrokenLink(link) {
@@ -162,6 +204,19 @@ function handleEvent(evt) {
     case "brokenLink":
       addBrokenLink(evt.link);
       break;
+    case "report": {
+      // Reporter's final ranked output: switch the list to grouped flaws.
+      state.report = evt.report;
+      $("stat-score").textContent = evt.report.score;
+      const scoreEl = $("stat-score");
+      scoreEl.className = `stat-num score ${evt.report.score >= 80 ? "good" : evt.report.score >= 50 ? "mid" : "bad"}`;
+      $("stat-high").textContent = evt.report.summary.bySeverity.high;
+      $("stat-med").textContent = evt.report.summary.bySeverity.medium;
+      $("stat-low").textContent = evt.report.summary.bySeverity.low;
+      renderFindings();
+      log("ok", `Report ready — score ${evt.report.score}/100, ${evt.report.summary.uniqueFlaws} unique flaw(s) across ${evt.report.summary.pagesTested} page(s)`);
+      break;
+    }
     case "error":
       log("warn", `Error: ${evt.message}`);
       setJet("error", "failed");
@@ -182,6 +237,9 @@ function startTest(url, maxPages, maxDepth) {
   state.screenshots.clear();
   state.pageChips.clear();
   state.brokenCount = 0;
+  state.report = null;
+  $("stat-score").textContent = "—";
+  $("stat-score").className = "stat-num";
   $("findings-count").textContent = "0";
   $("broken-count").textContent = "0";
   $("findings").innerHTML = '<p class="empty">Findings will stream in here live…</p>';
