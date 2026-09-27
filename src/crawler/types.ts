@@ -10,6 +10,12 @@ export interface CrawlOptions {
   maxDepth?: number;
   /** Limiter for concurrent page visits. */
   concurrency?: number;
+  /**
+   * Cap on how many discovered-but-uncrawled URLs get an individual HTTP
+   * check. A large sitemap can queue tens of thousands of these, and
+   * checking every one sequentially runs until the crawl deadline.
+   */
+  maxLinkChecks?: number;
   /** Where to write screenshot artifacts. */
   screenshotsDir?: string;
   /** Receive real-time crawl events (used for live UI). */
@@ -26,6 +32,7 @@ export interface LiveStats {
 export type CrawlEvent =
   | { type: "started"; baseUrl: string }
   | { type: "log"; level: "info" | "ok" | "warn"; message: string }
+  | { type: "agent"; agent: AgentRunEvent }
   | { type: "page"; page: CrawlPage }
   | { type: "stats"; stats: LiveStats }
   | { type: "brokenLink"; link: BrokenLink }
@@ -33,6 +40,7 @@ export type CrawlEvent =
   | { type: "error"; message: string };
 
 import type { Finding } from "../agents/types.js";
+import type { AgentRunEvent } from "../agents/types.js";
 
 export interface FindingCounts {
   high: number;

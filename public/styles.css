@@ -32,7 +32,14 @@ body {
 }
 
 .brand { display: flex; align-items: center; gap: 12px; }
-.logo { font-size: 28px; }
+/* Dugtrio mark: an SVG, so size it explicitly and keep it off the baseline */
+.logo {
+  display: block;
+  width: 92px;
+  height: 24px;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+}
 .topbar h1 { margin: 0; font-size: 18px; }
 .tagline { margin: 0; color: var(--muted); font-size: 12px; }
 

@@ -4,8 +4,8 @@ import { normalizeUrl, isInternalLink } from "./link-normalizer.js";
 import { CRAWLER_USER_AGENT, fetchRobots, isPathAllowed } from "./robots.js";
 import { fetchSitemap } from "./sitemap.js";
 import type { CrawlOptions, CrawlPage, CrawlReport, BrokenLink, FindingCounts, CrawlEvent } from "./types.js";
-import { runPageAgents, trackPage } from "../agents/index.js";
-import type { Finding } from "../agents/types.js";
+import { runPageAgents, trackPage, resetTelemetry } from "../agents/index.js";
+import type { Finding, Telemetry } from "../agents/types.js";
 
 interface QueueItem {
   url: string;
@@ -82,7 +82,22 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
     emit({ type: "log", level, message });
   };
 
-  const browser = await chromium.launch({ headless: true });
+  // Default to a visible window so you can watch the agents work. Set
+  // HEADLESS=1 for CI or any environment without a display.
+  const headful = process.env.HEADLESS !== "1";
+  const browser = await chromium.launch({ headless: !headful });
+
+  // One window stepping through the site reads far better than a stream of
+  // tabs popping up, so visible mode runs serially on a single reused page.
+  const effectiveConcurrency = headful ? 1 : concurrency;
+  let watchPage: Page | null = null;
+  let watchTelemetry: Telemetry | null = null;
+  if (headful) {
+    watchPage = await browser.newPage({ userAgent: CRAWLER_USER_AGENT });
+    watchPage.setDefaultTimeout(pageTimeout);
+    watchTelemetry = trackPage(watchPage);
+    log("info", "Visible browser attached — watching the crawl live");
+  }
 
   const enqueue = (item: QueueItem) => {
     plannedVisits++;
@@ -129,9 +144,17 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
     const visit = async (item: QueueItem) => {
       attempted++;
       log("info", `Testing ${item.canonical} (depth ${item.depth})`);
-      const page = await browser.newPage({ userAgent: CRAWLER_USER_AGENT });
-      page.setDefaultTimeout(pageTimeout);
-      const telemetry = trackPage(page);
+      const page = watchPage ?? (await browser.newPage({ userAgent: CRAWLER_USER_AGENT }));
+      if (!watchPage) page.setDefaultTimeout(pageTimeout);
+      let telemetry: Telemetry;
+      if (watchTelemetry) {
+        // Listeners are attached once for the shared page; clear the bag so
+        // this visit only reports its own load.
+        resetTelemetry(watchTelemetry);
+        telemetry = watchTelemetry;
+      } else {
+        telemetry = trackPage(page);
+      }
 
       const record: CrawlPage = {
         url: item.url,
@@ -188,16 +211,30 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
           enqueue({ url: link.absolute, canonical: link.target, depth: nextDepth, discoveredFrom: finalUrl });
         }
 
-        // Run the worker agents against this page.
-        const pageFindings = await runPageAgents({
-          page,
-          pageRecord: record,
-          response: resp,
-          finalUrl,
-          baseUrl,
-          telemetry,
-          screenshotsDir,
-        });
+        // Run the worker agents against this page. Each one reports as it
+        // finishes, so flaws reach the UI while the others are still running.
+        const pageFindings = await runPageAgents(
+          {
+            page,
+            pageRecord: record,
+            response: resp,
+            finalUrl,
+            baseUrl,
+            telemetry,
+            screenshotsDir,
+          },
+          (agentEvt) => {
+            emit({ type: "agent", agent: agentEvt });
+            const ms = `${agentEvt.durationMs}ms`;
+            if (agentEvt.error) {
+              log("warn", `${agentEvt.agent} failed on ${canonical} (${agentEvt.error})`);
+            } else if (agentEvt.findings.length > 0) {
+              log("warn", `${agentEvt.agent} picked up ${agentEvt.findings.length} flaw(s) on ${canonical} (${ms})`);
+            } else {
+              log("info", `${agentEvt.agent} found nothing on ${canonical} (${ms})`);
+            }
+          }
+        );
         record.findings = pageFindings;
         allFindings.push(...pageFindings);
         emit({ type: "page", page: record });
@@ -206,7 +243,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
           stats: { crawled: pages.length + 1, discovered: stats.discovered, planned: plannedVisits, failed: stats.failed },
         });
         if (pageFindings.length > 0) {
-          log("ok", `${pageFindings.length} flaw(s) found on ${canonical}`);
+          log("ok", `${pageFindings.length} flaw(s) on ${canonical} from 5 agents`);
         } else {
           log("info", `${canonical} looks clean`);
         }
@@ -214,7 +251,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
         stats.failed++;
         record.error = err instanceof Error ? err.message : String(err);
       } finally {
-        await page.close().catch(() => {});
+        if (!watchPage) await page.close().catch(() => {});
       }
 
       if (duplicate) return;
@@ -234,7 +271,7 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
       }
     };
 
-    const workers = Array.from({ length: concurrency }, async () => {
+    const workers = Array.from({ length: effectiveConcurrency }, async () => {
       while (true) {
         if (Date.now() >= deadline) break;
         const item = queue.shift();
@@ -250,15 +287,35 @@ export async function crawl(options: CrawlOptions): Promise<CrawlReport> {
 
     const apiContext = await browser.newContext({ userAgent: CRAWLER_USER_AGENT });
     try {
-      for (const check of deferredChecks) {
-        if (Date.now() >= deadline) break;
-        const status = await checkTarget(apiContext.request, check.target, pageTimeout);
-        if (status >= 400 || status === 0) {
-          const link: BrokenLink = { from: check.from, href: check.href, target: check.target, status };
-          brokenLinks.push(link);
-          emit({ type: "brokenLink", link });
-          log("warn", `Broken link: ${check.target} (HTTP ${status})`);
+      // A big sitemap can queue tens of thousands of URLs. Checking every one
+      // sequentially would run until the crawl deadline, so cap the work.
+      const maxLinkChecks = options.maxLinkChecks ?? 50;
+      const batch = deferredChecks.slice(0, maxLinkChecks);
+      if (deferredChecks.length > batch.length) {
+        log(
+          "info",
+          `Checking ${batch.length} of ${deferredChecks.length} queued links (cap ${maxLinkChecks}) — raise maxLinkChecks to check more`
+        );
+      }
+      const LINK_CHECK_CONCURRENCY = 8;
+      for (let i = 0; i < batch.length; i += LINK_CHECK_CONCURRENCY) {
+        if (Date.now() >= deadline) {
+          log("warn", "Link checks cut short by the crawl deadline");
+          break;
         }
+        const slice = batch.slice(i, i + LINK_CHECK_CONCURRENCY);
+        const statuses = await Promise.all(
+          slice.map((check) => checkTarget(apiContext.request, check.target, pageTimeout))
+        );
+        slice.forEach((check, idx) => {
+          const status = statuses[idx];
+          if (status >= 400 || status === 0) {
+            const link: BrokenLink = { from: check.from, href: check.href, target: check.target, status };
+            brokenLinks.push(link);
+            emit({ type: "brokenLink", link });
+            log("warn", `Broken link: ${check.target} (HTTP ${status})`);
+          }
+        });
       }
     } finally {
       await apiContext.close().catch(() => {});

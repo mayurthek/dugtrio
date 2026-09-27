@@ -54,6 +54,7 @@ app.post("/test", (req, res) => {
   }
   const maxPages = Number(req.body?.maxPages ?? 25);
   const maxDepth = Number(req.body?.maxDepth ?? 2);
+  const maxLinkChecks = Number(req.body?.maxLinkChecks ?? 50);
 
   const id = randomUUID();
   const job: Job = {
@@ -70,6 +71,7 @@ app.post("/test", (req, res) => {
     baseUrl,
     maxPages,
     maxDepth,
+    maxLinkChecks,
     onEvent: (event) => {
       broadcast(job, event);
       if (event.type === "done") {
@@ -93,7 +95,7 @@ app.post("/test", (req, res) => {
     finishEventStream(job);
   });
 
-  res.status(202).json({ id, status: job.status, maxPages, maxDepth });
+  res.status(202).json({ id, status: job.status, maxPages, maxDepth, maxLinkChecks });
 });
 
 app.get("/events/:id", (req, res) => {

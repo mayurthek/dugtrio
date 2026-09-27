@@ -69,6 +69,25 @@ export interface PageAgent {
   run(ctx: AgentContext): Promise<Finding[]>;
 }
 
+/**
+ * Emitted the moment a single agent finishes with a page, so the UI can show
+ * flaws as they are picked up instead of waiting for the slowest agent.
+ */
+export interface AgentRunEvent {
+  /** Agent id, e.g. "accessibility". */
+  agent: string;
+  name: string;
+  category: Category;
+  /** Canonical URL of the page that was inspected. */
+  url: string;
+  /** Findings this agent produced (already id-assigned). */
+  findings: Finding[];
+  /** How long the agent took on this page. */
+  durationMs: number;
+  /** Set when the agent threw; the run continues without its findings. */
+  error?: string;
+}
+
 /** Attach page listeners that record what happened during load into a telemetry bag. */
 export function trackPage(page: Page): Telemetry {
   const telemetry: Telemetry = {
@@ -105,4 +124,17 @@ export function trackPage(page: Page): Telemetry {
   });
 
   return telemetry;
+}
+
+/**
+ * Clear a telemetry bag in place. Needed when one page is reused across
+ * visits (visible-browser mode), so listeners are attached once but each
+ * visit only reports its own load.
+ */
+export function resetTelemetry(telemetry: Telemetry): void {
+  telemetry.consoleErrors.length = 0;
+  telemetry.pageErrors.length = 0;
+  telemetry.failedResponses.length = 0;
+  telemetry.failedRequests.length = 0;
+  telemetry.requests.length = 0;
 }

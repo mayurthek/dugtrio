@@ -93,6 +93,21 @@ function appendFinding(f) {
   renderFindings();
 }
 
+/** Add a batch of findings and repaint once, instead of per finding. */
+function appendFindings(list) {
+  if (!list || !list.length) return;
+  let added = 0;
+  for (const f of list) {
+    if (state.findings.has(f.id)) continue;
+    state.findings.set(f.id, f);
+    added++;
+  }
+  if (!added) return;
+  $("findings-count").textContent = state.findings.size;
+  updateCounts();
+  renderFindings();
+}
+
 function renderFindings() {
   const box = $("findings");
   box.innerHTML = "";
@@ -192,6 +207,14 @@ function handleEvent(evt) {
     case "stats":
       updateStats(evt.stats);
       break;
+    case "agent": {
+      // One agent finished with the current page: surface its flaws now
+      // instead of waiting for the other four.
+      const a = evt.agent;
+      appendFindings(a.findings);
+      setJet("running", `testing · ${a.agent}`);
+      break;
+    }
     case "page": {
       if (!state.screenshots.has(evt.page.canonical) && evt.page.screenshot) {
         state.screenshots.set(evt.page.canonical, evt.page.screenshot);
